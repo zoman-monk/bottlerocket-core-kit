@@ -346,14 +346,6 @@ where
 {
     // Get basic settings, as retrieved from the config file.
     let name = name.as_ref();
-
-    // Zomato lockdown: admin host container is permanently disabled in this build.
-    // Regardless of what settings say, we never provision or start it.
-    if name == "admin" {
-        info!("Skipping admin host container - permanently disabled in this build");
-        return Ok(());
-    }
-
     let source = image_details
         .source
         .as_ref()
