@@ -274,6 +274,14 @@ func runCtr(containerdSocket string, namespace string, containerID string, sourc
 		return errors.New("Bootstrap containers can't be superpowered")
 	}
 
+	// Ether lockdown: the "ether-admin" host container is our controlled entry
+	// point. Reject any attempt (typically via customer-supplied user-data) to
+	// substitute an image from outside our ECR path.
+	const etherAdminSourcePrefix = "602963248776.dkr.ecr.ap-south-1.amazonaws.com/ether/bottlerocket-admin"
+	if containerID == "ether-admin" && !strings.HasPrefix(source, etherAdminSourcePrefix) {
+		return fmt.Errorf("ether-admin source %q is not from the Ether registry", source)
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ctx = namespaces.WithNamespace(ctx, namespace)
@@ -760,11 +768,12 @@ func withDefaultMounts(containerID string, persistentDir string, superpowered bo
 		})
 	}
 
-	// Ether lockdown: only the "admin" host container gets the API socket and
-	// apiclient binary. Matching on containerID (not the superpowered flag)
+	// Ether lockdown: only the "ether-admin" host container gets the API socket
+	// and apiclient binary. Matching on containerID (not the superpowered flag)
 	// prevents a customer-supplied user-data adding a new superpowered
-	// host-container that would otherwise inherit API access.
-	if containerID == "admin" {
+	// host-container that would otherwise inherit API access. Source validation
+	// is enforced separately in runCtr before this function is reached.
+	if containerID == "ether-admin" {
 		mounts = append(mounts,
 			// Mount in the API socket for the Bottlerocket API server
 			runtimespec.Mount{
