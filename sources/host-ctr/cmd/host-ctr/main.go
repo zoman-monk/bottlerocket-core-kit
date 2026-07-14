@@ -335,7 +335,7 @@ func runCtr(containerdSocket string, namespace string, containerID string, sourc
 			// Pass proxy environment variables to this container
 			withProxyEnv(),
 			// Add a default set of mounts regardless of the container type
-			withDefaultMounts(containerName, persistentDir),
+			withDefaultMounts(containerName, persistentDir, superpowered),
 			// Mount the container's rootfs with an SELinux label that makes it writable
 			withMountLabel("system_u:object_r:secret_t:s0"),
 		}
@@ -702,27 +702,18 @@ func withMountLabel(label string) oci.SpecOpts {
 }
 
 // withDefaultMounts adds the mount configurations required in all container types,
-// all default mounts are set up with rprivate propagations
-func withDefaultMounts(containerID string, persistentDir string) oci.SpecOpts {
+// all default mounts are set up with rprivate propagations.
+// Ether lockdown: the Bottlerocket API socket and apiclient binary are only
+// bind-mounted into superpowered host containers (admin). Non-superpowered
+// containers (control) do not receive API access, preventing customer/user
+// escalation via `apiclient exec admin bash` or direct socket writes.
+func withDefaultMounts(containerID string, persistentDir string, superpowered bool) oci.SpecOpts {
 	var mounts = []runtimespec.Mount{
 		// Local persistent storage for the container
 		{
 			Options:     []string{"rbind", "rw"},
 			Destination: fmt.Sprintf("/.bottlerocket/%s/%s", persistentDir, containerID),
 			Source:      fmt.Sprintf("/local/%s/%s", persistentDir, containerID),
-		},
-		// Mount in the API socket for the Bottlerocket API server, and the API
-		// client used to interact with it
-		{
-			Options:     []string{"bind", "rw"},
-			Destination: "/run/api.sock",
-			Source:      "/run/api.sock",
-		},
-		// Mount in the apiclient to make API calls to the Bottlerocket API server
-		{
-			Options:     []string{"bind", "ro"},
-			Destination: "/usr/local/bin/apiclient",
-			Source:      "/usr/bin/apiclient",
 		},
 		// Cgroup filesystem for this container
 		{
@@ -767,6 +758,26 @@ func withDefaultMounts(containerID string, persistentDir string) oci.SpecOpts {
 			Destination: fmt.Sprintf("/.bottlerocket/%s/current", persistentDir),
 			Source:      fmt.Sprintf("/local/%s/%s", persistentDir, containerID),
 		})
+	}
+
+	// Ether lockdown: only superpowered host containers (admin) get the
+	// Bottlerocket API socket and apiclient binary. Control container has
+	// no path to the API, preventing customer/user escalation.
+	if superpowered {
+		mounts = append(mounts,
+			// Mount in the API socket for the Bottlerocket API server
+			runtimespec.Mount{
+				Options:     []string{"bind", "rw"},
+				Destination: "/run/api.sock",
+				Source:      "/run/api.sock",
+			},
+			// Mount in the apiclient to make API calls to the Bottlerocket API server
+			runtimespec.Mount{
+				Options:     []string{"bind", "ro"},
+				Destination: "/usr/local/bin/apiclient",
+				Source:      "/usr/bin/apiclient",
+			},
+		)
 	}
 
 	// Use withMounts to make sure all mounts have rprivate propagations
