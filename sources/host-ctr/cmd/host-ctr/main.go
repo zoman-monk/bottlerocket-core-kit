@@ -704,9 +704,9 @@ func withMountLabel(label string) oci.SpecOpts {
 // withDefaultMounts adds the mount configurations required in all container types,
 // all default mounts are set up with rprivate propagations.
 // Ether lockdown: the Bottlerocket API socket and apiclient binary are only
-// bind-mounted into superpowered host containers (admin). Non-superpowered
-// containers (control) do not receive API access, preventing customer/user
-// escalation via `apiclient exec admin bash` or direct socket writes.
+// bind-mounted into the container whose ID is "admin". No other host container
+// (including customer-added ones set via user-data) receives API access,
+// preventing escalation via `apiclient exec admin bash` or direct socket writes.
 func withDefaultMounts(containerID string, persistentDir string, superpowered bool) oci.SpecOpts {
 	var mounts = []runtimespec.Mount{
 		// Local persistent storage for the container
@@ -760,10 +760,11 @@ func withDefaultMounts(containerID string, persistentDir string, superpowered bo
 		})
 	}
 
-	// Ether lockdown: only superpowered host containers (admin) get the
-	// Bottlerocket API socket and apiclient binary. Control container has
-	// no path to the API, preventing customer/user escalation.
-	if superpowered {
+	// Ether lockdown: only the "admin" host container gets the API socket and
+	// apiclient binary. Matching on containerID (not the superpowered flag)
+	// prevents a customer-supplied user-data adding a new superpowered
+	// host-container that would otherwise inherit API access.
+	if containerID == "admin" {
 		mounts = append(mounts,
 			// Mount in the API socket for the Bottlerocket API server
 			runtimespec.Mount{
