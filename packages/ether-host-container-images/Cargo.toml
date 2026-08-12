@@ -1,0 +1,12 @@
+[package]
+name = "ether-host-container-images"
+version = "0.1.0"
+edition = "2021"
+publish = false
+build = "../build.rs"
+
+[lib]
+path = "../packages.rs"
+
+[package.metadata.build-package]
+package-name = "ether-host-container-images"

@@ -1,0 +1,15 @@
+[Unit]
+Description=Preload Ether host container images from local tarballs
+DefaultDependencies=no
+After=host-containerd.service
+Before=host-containers.target
+Requires=host-containerd.service
+ConditionPathExistsGlob=/usr/share/ether/host-containers/*.tar
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/sh -c 'for t in /usr/share/ether/host-containers/*.tar; do /usr/bin/ctr --address /run/host-containerd/containerd.sock -n default images import "$t" || exit 1; done'
+
+[Install]
+WantedBy=host-containers.target
