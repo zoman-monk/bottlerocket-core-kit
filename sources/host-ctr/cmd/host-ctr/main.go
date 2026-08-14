@@ -311,8 +311,12 @@ func runCtr(containerdSocket string, namespace string, containerID string, sourc
 	// Ether: import locally-baked OCI tarball into containerd's image store
 	// before attempting a network pull. Enables air-gap boot for Ether AMIs
 	// that ship host container images inside the AMI (see the
-	// ether-host-container-images package).
-	importLocalHostContainerTarball(ctx, client, containerID)
+	// ether-host-container-images package). If import succeeds, force
+	// useCachedImage so fetchImage returns the newly-imported image instead
+	// of doing a redundant (and likely failing) network pull.
+	if importLocalHostContainerTarball(ctx, client, containerID) {
+		useCachedImage = true
+	}
 
 	img, err = fetchImage(ctx, source, client, registryConfigPath, useCachedImage, emptyLabels)
 	if err != nil {
@@ -952,22 +956,23 @@ func withProxyEnv() oci.SpecOpts {
 // baked into the AMI for the named host container. The tarball path is
 // derived from the containerID; if the file doesn't exist, this is a no-op.
 // Errors are logged and swallowed so callers still fall through to a network
-// pull if the local import fails.
-func importLocalHostContainerTarball(ctx context.Context, client *containerd.Client, containerID string) {
+// pull if the local import fails. Returns true if the import succeeded.
+func importLocalHostContainerTarball(ctx context.Context, client *containerd.Client, containerID string) bool {
 	path := filepath.Join("/usr/share/ether/host-containers", containerID+".tar")
 	f, err := os.Open(path)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.G(ctx).WithError(err).WithField("path", path).Warn("failed to open local host container tarball")
 		}
-		return
+		return false
 	}
 	defer f.Close()
 	if _, err := client.Import(ctx, f); err != nil {
 		log.G(ctx).WithError(err).WithField("path", path).Warn("failed to import local host container tarball")
-		return
+		return false
 	}
 	log.G(ctx).WithField("path", path).Info("imported local host container tarball into containerd image store")
+	return true
 }
 
 // fetchImage returns a `containerd.Image` given an image source.
