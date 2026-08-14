@@ -955,8 +955,11 @@ func withProxyEnv() oci.SpecOpts {
 // Ether: importLocalHostContainerTarball tries to import an OCI archive
 // baked into the AMI for the named host container. The tarball path is
 // derived from the containerID; if the file doesn't exist, this is a no-op.
-// Errors are logged and swallowed so callers still fall through to a network
-// pull if the local import fails. Returns true if the import succeeded.
+// After importing image records into the content store, the images are also
+// unpacked into the overlayfs snapshotter so container create can find the
+// snapshot chain. Errors are logged and swallowed so callers still fall
+// through to a network pull if the local import fails. Returns true if any
+// image was imported and successfully unpacked.
 func importLocalHostContainerTarball(ctx context.Context, client *containerd.Client, containerID string) bool {
 	path := filepath.Join("/usr/share/ether/host-containers", containerID+".tar")
 	f, err := os.Open(path)
@@ -967,12 +970,25 @@ func importLocalHostContainerTarball(ctx context.Context, client *containerd.Cli
 		return false
 	}
 	defer f.Close()
-	if _, err := client.Import(ctx, f); err != nil {
+	imgs, err := client.Import(ctx, f)
+	if err != nil {
 		log.G(ctx).WithError(err).WithField("path", path).Warn("failed to import local host container tarball")
 		return false
 	}
-	log.G(ctx).WithField("path", path).Info("imported local host container tarball into containerd image store")
-	return true
+	unpacked := false
+	for _, imgRec := range imgs {
+		image := containerd.NewImage(client, imgRec)
+		if err := image.Unpack(ctx, containerd.DefaultSnapshotter); err != nil {
+			log.G(ctx).WithError(err).WithField("ref", imgRec.Name).Warn("failed to unpack imported image")
+			continue
+		}
+		unpacked = true
+		log.G(ctx).WithField("ref", imgRec.Name).Info("unpacked imported host container image")
+	}
+	if unpacked {
+		log.G(ctx).WithField("path", path).Info("imported local host container tarball into containerd image store")
+	}
+	return unpacked
 }
 
 // fetchImage returns a `containerd.Image` given an image source.
